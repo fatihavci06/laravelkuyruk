@@ -1,0 +1,146 @@
+Mail Gönderme
+
+Öncesinde bu işlemler yapılmalıdır
+
+1)php artisan queue:table
+2)php artisan migrate
+
+
+4).env içerisinde aşağıdaki satır güncellenir.//yapılan işlemler database job tablosuna düşer
+eski hal:QUEUE_CONNECTION=sync
+yeni hal:QUEUE_CONNECTION=database  
+
+Öncelikle env içerisinde mail konfigürasyonu yapılır.kullanıcı adı şifreye mailtrap.io içerisinden ulaşılabilir.myinbox integreation altından laravel 7+ seçilmeli
+
+MAIL_MAILER=smtp
+MAIL_HOST=smtp.mailtrap.io
+MAIL_PORT=2525
+MAIL_USERNAME=884d554b6bd61c
+MAIL_PASSWORD=6088a253146cc9
+MAIL_ENCRYPTION=tls
+
+
+1)php artisan make:mail QueueSendMail  app/mail/QueueSendMail.php   //mail gönderimi için bir kuyruk oluşturduk
+
+<?php
+
+namespace App\Mail;
+use App\Models\User;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Mail\Mailable;
+use Illuminate\Queue\SerializesModels;
+
+class QueueSendMail extends Mailable
+{
+    use Queueable, SerializesModels;
+
+    /**
+     * Create a new message instance.
+     *
+     * @return void
+     */
+    public function __construct($user)
+    {
+        //
+        $this->user=$user;
+    }
+
+    /**
+     * Build the message.
+     *
+     * @return $this
+     */
+    public function build()
+    {
+        $user=$this->user;
+        return $this->view('mail',compact('user'));
+    }
+}
+
+
+
+
+
+2)php artisan make:job MailSendJob  // app/Jobs altında MailSendJob adında yeni bir job oluşturduk
+
+
+
+<?php
+
+namespace App\Jobs;
+use App\Models\User;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Mail;
+class MailSendJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    /**
+     * Create a new job instance.
+     *
+     * @return void
+     */
+    public $user;
+    public function __construct($user) //routte burası ile ilgili fonksiyon çalıştığında $userda orada gönderilir.
+    {
+        $this->user=$user;
+    }
+
+    /**
+     * Execute the job.
+     *
+     * @return void
+     */
+    public function handle() //kuyruk çalıştığında burasıda çalışır
+    {
+        //
+        $user=$this->user;
+        $email=new  \App\Mail\QueueSendMail($user); //biz bu mail işlemini yukarıdaki maddede tanımladık
+        Mail::to($user->email)->send($email);//mail gönderim işlemi yaptık. Kontrolüde mailtrapa login olarak görüntüledik
+    }
+}
+
+------route --- isterse bu işlemi controllerida yaptırabiliri
+
+
+Route::get('/queue', function () {
+    $user=\App\Models\User::find(1);//1 idli userı bulduk
+    \App\Jobs\MailSendJob::dispatch($user);//app\jobs\MailSendJob içerisindeki construct fonksiyona dispatch ile göndermiş olduk
+    
+  
+
+
+
+    dd('tamammlandı');
+
+});
+
+
+3)php artisan queue:work //kuyruktatakileri çalıştırdık.routetaki urlyi çalıştıdığımızda bu işlem gerçekleşir.çünkü fonksiyonlar orada
+
+eğer hata verirse
+php artisan config:cache
+
+4)QueueSendMail in çağırdığı view içerisi
+Queue Mail örneği
+
+<hr>
+	Sayın {{$user->name}}, hoşgeldiniz.
+</hr>
+
+
+Özet Olarak
+
+1)quee için bir job tanımladık app\jobs\MailSendJob  //bu job quee işlemlerinin yürütüldüğü jobtır
+2)MailSendJob  içerisinde de email gönderim işlemini gerçekleştiren fonksiyonların olduğu classı oluşturduk php artisan make:mail QueueSendMail  //app/Mail/QueueSendMail
+3).env içerisinde mail sunucu işlemleri tanımladık
+4)controllerdada yapılabilir ancak biz direk routte yaptık MailSendJob içerisine 1 idli userin tüm bilgilerini gönderdik
+5)MailSendJobda gitti QueueSendMail classını çağırdı.QueueSendMail classıda oluşturuğumuz mail viewini çağırdı(burada kullanıcıya giden mailin formatını ayarlıyoruz)
+6)Daha sonra MailSendJob QueueSendMail classından aldığı email formatıyla maili gönderdi
+7)hatalar failed_jobs tablosunda tutulur.
